@@ -94,6 +94,53 @@ class TreeEvaluator {
     }
 
     template <typename GradientSumT>
+    XGBOOST_DEVICE float CalculateSplitWithMinP(const std::vector<Instance>& instances, int feature_dim) {
+    float p = 1.0f;
+    float G = 0, G2 = 0, n = 0;
+
+    for (const auto& instance : instances) {
+     G += instance.g;
+      G2 += instance.g * instance.g;
+      n += 1;
+   }
+
+    for (int k = 0; k < feature_dim; ++k) {
+      float GL = 0, G2L = 0, nL = 0;
+
+      for (const auto& instance : SortInstances(instances, k)) {
+        GL += instance.g;
+        G2L += instance.g * instance.g;
+        nL += 1;
+
+        float GR = G - GL;
+        float G2R = G2 - G2L;
+        float nR = n - nL;
+
+        float mL = GL / nL;
+        float vL = G2L / nL - mL * mL;
+        float mR = GR / nR;
+        float vR = G2R / nR - mR * mR;
+        // Calculate t-statistic
+        float t = std::abs(mL - mR) / std::sqrt(vL / nL + vR / nR);
+        // Calculate degrees of freedom
+        float nu = std::pow(vL / nL + vR / nR, 2) /
+                 (std::pow(vL, 2) / (nL * nL * (nL - 1)) +
+                  std::pow(vR, 2) / (nR * nR * (nR - 1)));
+
+        p = std::min(p, CalculatePValue(t, nu));
+      }
+    }
+    // Return the split with min p-value
+    return p;
+  }
+
+    templae <typename GradientSumT>
+    XGBOOST_DEVICE float CalculatePValue(float t_stat, float degrees_of_freedom) {
+    boost::math::students_t dist(degrees_of_freedom);
+    return 2 * boost::math::cdf(boost::math::complement(dist, std::abs(t_stat)));
+    }
+
+    template <typename GradientSumT>
     XGBOOST_DEVICE float CalcWeight(bst_node_t nodeid, const ParamT &param,
                                     GradientSumT const& stats) const {
       float w = ::xgboost::tree::CalcWeight(param, stats);
